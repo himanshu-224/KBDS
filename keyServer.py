@@ -16,6 +16,25 @@ if len(bsNodes)==0:
     print 'No BootStrap Nodes Available..Exiting\n'
     sys.exit(0)
     
+serv=socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+while(1):
+    try:
+        serv.bind(('',PORT))
+        print 'Port : ',PORT
+        break
+    except:
+        PORT=random.randint(5000,65000)
+        
+### Server local list
+MAIN_CHUNK_LIST = []
+BACKUP_CHUNK_LIST = []
+DATA_STORE = {}
+
+### Server global list
+allActiveNodes=[]
+CHUNK_NODE_MAP={}        
+    
 #Select the Zone to connect to somehow
     
 class connectionThread(Thread):
@@ -31,11 +50,28 @@ class connectionThread(Thread):
             dataDict=handle_data(data)
             if 'type' in dataDict.keys() and 'request' in dataDict.key() and dataDict['type']=='client' and dataDict['request']=='keyspace':
                 pass            
-            if request in dataDict.keys() and dataDict['request']=='endconnection':
+            elif request in dataDict.keys() and dataDict['request']=='endconnection':
                 print 'Ending connection with ',self.addr[0],':',self.addr[1]
                 self.conn.close()
                 break
+
+class chunkRequestThread(Thread):
+    def __init__(self,keyNode):
+        self.nodeIp = keyNode['ip']
+        self.nodePort = keyNode['port']
+        self.BUFF_SIZE = 2048
         
+    def run(self):
+        attempt = 0
+        while (attempt < 5) :
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            try :
+                sock.connect((self.nodeIp, int(self.nodePort)))
+                print 'ChunkRequestThread\t Connected with keyServer ' + self.nodeIp+':'+self.nodePort
+                tempDic = getChunkList(sock)
+            except socket.error, msg :
+                print 'Bind failed. Error Code : ' + str(msg[0]) + ' Message ' + msg[1]
+            attempt+=1                
 
 def handle_data(data):
     msgs=data.split('?')
@@ -62,7 +98,7 @@ def select_bsnode(i):
 		return None	
 	        
         
-def establish_keyspace(s):
+def establish_keyspace(s):    
     print 'Successfully Registered Keyspace'
     return True
 
@@ -145,19 +181,12 @@ while(1):
     attemptno+=1        
 
 print allActiveNodes    
-s=socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+### Add functionality to get all the data and chunks
+
+serv.listen(10) 
 
 while(1):
-    try:
-        s.bind(('',PORT))
-        print 'Port : ',PORT
-        break
-    except:
-        PORT=random.randint(5000,65000)
-
-s.listen(10)
-
-while(1):
-    conn,data = s.accept()
+    conn,data = serv.accept()
     thread=connectionThread(conn,addr)
     thread.start()
