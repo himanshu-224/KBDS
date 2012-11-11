@@ -48,12 +48,62 @@ class connectionThread(Thread):
         while 1:
             data=self.conn.recv(self.BUF_SIZE)
             dataDict=handle_data(data)
+            if dataDict.has_key('type') and dataDict['type'] =='keyserver':
+                if dataDict.has_key('request') and dataDict['request'] == 'keyspace':
+                    numKeyServer = int(dataDict['numNodes'])
+                    #if len(allActiveNodes) > numKeyServer:
+                    #    numKeyServer = len(allActiveNodes)
+                    self.requestKeyspace(numKeyServer)
+                elif dataDict.has_key('request') and dataDict['request'] == 'endconnection':
+                    print 'Ending connection with ',self.addr[0],':',self.addr[1]
+                    self.conn.close()
+                    break
+                    
             if 'type' in dataDict.keys() and 'request' in dataDict.key() and dataDict['type']=='client' and dataDict['request']=='keyspace':
                 pass            
             elif request in dataDict.keys() and dataDict['request']=='endconnection':
                 print 'Ending connection with ',self.addr[0],':',self.addr[1]
                 self.conn.close()
                 break
+                
+    def requestKeyspace(self,numKeyServer):
+        requestServer = str(self.addr[0]) + ':' + str(self.addr[1])
+        currentServer = HOST + ':' + str(PORT)
+        if numKeyServer == 2:
+            transferList = repartition(MAIN_CHUNK_LIST,2)
+            Msg = '?type=keyserver?reply=keyspace?main='
+            for item in transferList:
+                MAIN_CHUNK_LIST.remove(item)
+                BACKUP_CHUNK_LIST.append(item)
+                CHUNK_NODE_MAP[item][0] = requestServer
+                CHUNK_NODE_MAP[item][1] = currentServer
+                Msg = Msg + str(item)+':'
+            Msg = Msg + '?backup='
+            for chunk in MAIN_CHUNK_LIST:
+                CHUNK_NODE_MAP[item][1] = requestServer
+                Msg += str(item)+':'
+            Msg = Msg+'?'
+            self.conn.send(Msg)
+            return
+        else :
+            transferList = repartition(MAIN_CHUNK_LIST,numKeyServer)
+            Msg = '?type=keyserver?reply=keyspace?main='
+            for item in transferList:
+                MAIN_CHUNK_LIST.remove(item)
+                CHUNK_NODE_MAP[item][0] = requestServer
+                Msg = Msg + str(item) + ':'
+            Msg = Msg+'?'
+            transferList = repartition(BACKUP_CHUNK_LIST,numKeyServer)
+            Msg = Msg+'backup='
+            for item in transferList:
+                BACKUP_CHUNK_LIST.remove(item)
+                CHUNK_NODE_MAP[item][1] = requestServer
+                Msg = Msg + str(item) + ':'
+            Msg = Msg+'?'
+            self.conn.send(Msg)
+            return
+            
+            
 
 class chunkRequestThread(Thread):
     def __init__(self,keyNode):
@@ -68,10 +118,40 @@ class chunkRequestThread(Thread):
             try :
                 sock.connect((self.nodeIp, int(self.nodePort)))
                 print 'ChunkRequestThread\t Connected with keyServer ' + self.nodeIp+':'+self.nodePort
-                tempDic = getChunkList(sock)
+                self.getChunkList(sock)
+                sock.close()
             except socket.error, msg :
                 print 'Bind failed. Error Code : ' + str(msg[0]) + ' Message ' + msg[1]
             attempt+=1                
+    
+    def getChunkList(self,sock):
+        numKeyServer = len(allActiveNodes) + 1
+        Msg = '?type=keyserver?request=keyspace?numNodes='+str(numKeyServer)+'?'
+        sock.send(Msg)
+        data = sock.recv(self.BUFF_SIZE)
+        dataDict = handle_data(data)
+        ### Add how to handle the list received
+        currentServer = HOST + ':' + str(PORT)
+        requestServer = self.nodeIp + ':' + self.nodePort
+        if dataDict.has_key('type') and dataDict['type'] = 'keyserver':
+            if dataDict.has_key('reply') and dataDict['reply'] = 'keyspace':
+                msg = dataDict['main']
+                if msg.find(':')!=-1:
+                    chunklist = msg.split(':')
+                    for chunks in chunklist :
+                        if len(chunks)!=0:
+                            MAIN_CHUNK_LIST.append(int(chunks))
+                            CHUNK_NODE_MAP[int(chunks)][0] = currentServer
+                msg = dataDict['backup']
+                if msg.find(':')!=-1:
+                    chunklist = msg.split(':')
+                    for chunks in chunklist :
+                        if len(chunks)!=0:
+                            BACKUP_CHUNK_LIST.append(int(chunks))
+                            CHUNK_NODE_MAP[int(chunks)][1] = currentServer
+        Msg = '?type=keyserver?request=endconnection?'
+        sock.send(Msg)
+        return
 
 def handle_data(data):
     msgs=data.split('?')
