@@ -5,6 +5,9 @@ from bootstraplist import BootStrapNodeList
 from threading import Thread
 import sys
 from utils import *
+from keyspace import *
+
+NUM_PART = 256
 
 HOST=get_ip()
 PORT=random.randint(5000,65000)
@@ -33,7 +36,9 @@ DATA_STORE = {}
 
 ### Server global list
 allActiveNodes=[]
-CHUNK_NODE_MAP={}        
+CHUNK_NODE_MAP={}
+for i in xrange(256):
+    CHUNK_NODE_MAP[i]=['','']
     
 #Select the Zone to connect to somehow
     
@@ -45,8 +50,12 @@ class connectionThread(Thread):
         self.BUFF_SIZE=2048
         
     def run(self):
+        global allActiveNodes
+        global MAIN_CHUNK_LIST
+        
         while 1:
-            data=self.conn.recv(self.BUF_SIZE)
+            data=self.conn.recv(self.BUFF_SIZE)
+            print data
             dataDict=handle_data(data)
             if dataDict.has_key('type') and dataDict['type'] =='keyserver':
                 if dataDict.has_key('request') and dataDict['request'] == 'keyspace':
@@ -54,24 +63,32 @@ class connectionThread(Thread):
                     #if len(allActiveNodes) > numKeyServer:
                     #    numKeyServer = len(allActiveNodes)
                     self.requestKeyspace(numKeyServer)
+                    #print MAIN_CHUNK_LIST
                 elif dataDict.has_key('request') and dataDict['request'] == 'endconnection':
                     print 'Ending connection with ',self.addr[0],':',self.addr[1]
                     self.conn.close()
                     break
                     
-            if 'type' in dataDict.keys() and 'request' in dataDict.key() and dataDict['type']=='client' and dataDict['request']=='keyspace':
+            if 'type' in dataDict.keys() and 'request' in dataDict.keys() and dataDict['type']=='client' and dataDict['request']=='keyspace':
                 pass            
-            elif request in dataDict.keys() and dataDict['request']=='endconnection':
+            elif 'request' in dataDict.keys() and dataDict['request']=='endconnection':
                 print 'Ending connection with ',self.addr[0],':',self.addr[1]
                 self.conn.close()
                 break
                 
     def requestKeyspace(self,numKeyServer):
+        global MAIN_CHUNK_LIST
+        global BACKUP_CHUNK_LIST
+        global CHUNK_NODE_MAP
+        global DATA_STORE
+        global allActiveNodes
+        
         requestServer = str(self.addr[0]) + ':' + str(self.addr[1])
         currentServer = HOST + ':' + str(PORT)
         if numKeyServer == 2:
             transferList = repartition(MAIN_CHUNK_LIST,2)
             Msg = '?type=keyserver?reply=keyspace?main='
+            #print transferList
             for item in transferList:
                 MAIN_CHUNK_LIST.remove(item)
                 BACKUP_CHUNK_LIST.append(item)
@@ -80,8 +97,8 @@ class connectionThread(Thread):
                 Msg = Msg + str(item)+':'
             Msg = Msg + '?backup='
             for chunk in MAIN_CHUNK_LIST:
-                CHUNK_NODE_MAP[item][1] = requestServer
-                Msg += str(item)+':'
+                CHUNK_NODE_MAP[chunk][1] = requestServer
+                Msg += str(chunk)+':'
             Msg = Msg+'?'
             self.conn.send(Msg)
             return
@@ -107,12 +124,14 @@ class connectionThread(Thread):
 
 class chunkRequestThread(Thread):
     def __init__(self,keyNode):
+        Thread.__init__(self)
         self.nodeIp = keyNode['ip']
         self.nodePort = keyNode['port']
         self.BUFF_SIZE = 2048
         
     def run(self):
         attempt = 0
+        print 'test'
         while (attempt < 5) :
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             try :
@@ -120,21 +139,29 @@ class chunkRequestThread(Thread):
                 print 'ChunkRequestThread\t Connected with keyServer ' + self.nodeIp+':'+self.nodePort
                 self.getChunkList(sock)
                 sock.close()
+                break
             except socket.error, msg :
                 print 'Bind failed. Error Code : ' + str(msg[0]) + ' Message ' + msg[1]
             attempt+=1                
     
     def getChunkList(self,sock):
-        numKeyServer = len(allActiveNodes) + 1
+        global MAIN_CHUNK_LIST
+        global BACKUP_CHUNK_LIST
+        global CHUNK_NODE_MAP
+        global DATA_STORE
+        global allActiveNodes
+        
+        numKeyServer = len(allActiveNodes)
         Msg = '?type=keyserver?request=keyspace?numNodes='+str(numKeyServer)+'?'
         sock.send(Msg)
         data = sock.recv(self.BUFF_SIZE)
+        print data
         dataDict = handle_data(data)
         ### Add how to handle the list received
         currentServer = HOST + ':' + str(PORT)
         requestServer = self.nodeIp + ':' + self.nodePort
-        if dataDict.has_key('type') and dataDict['type'] = 'keyserver':
-            if dataDict.has_key('reply') and dataDict['reply'] = 'keyspace':
+        if dataDict.has_key('type') and dataDict['type'] == 'keyserver':
+            if dataDict.has_key('reply') and dataDict['reply'] == 'keyspace':
                 msg = dataDict['main']
                 if msg.find(':')!=-1:
                     chunklist = msg.split(':')
@@ -151,6 +178,7 @@ class chunkRequestThread(Thread):
                             CHUNK_NODE_MAP[int(chunks)][1] = currentServer
         Msg = '?type=keyserver?request=endconnection?'
         sock.send(Msg)
+        #print MAIN_CHUNK_LIST
         return
 
 def handle_data(data):
@@ -226,7 +254,7 @@ while(1):
                 
 	
 attemptno=0
-allActiveNodes=[]
+#allActiveNodes=[]
 
 while(1):
     myBSNode=select_bsnode(attemptno)
@@ -263,10 +291,28 @@ while(1):
 print allActiveNodes    
 
 ### Add functionality to get all the data and chunks
+if len(allActiveNodes) == 1:
+    currentServer = HOST + ':' + str(PORT)
+    for i in xrange(NUM_PART):
+        MAIN_CHUNK_LIST.append(i)
+        CHUNK_NODE_MAP[i][0] = currentServer
+        CHUNK_NODE_MAP[i][1] = currentServer
+else :
+    print 'else'
+    currentServer = HOST + ':' + str(PORT)
+    for keyNode in allActiveNodes:
+        otherServer = keyNode['ip']+':'+keyNode['port']
+        print otherServer
+        if currentServer != otherServer:
+            print 'else2'
+            thread = chunkRequestThread(keyNode)
+            thread.start()
+
+#print MAIN_CHUNK_LIST
 
 serv.listen(10) 
 
 while(1):
-    conn,data = serv.accept()
+    conn,addr = serv.accept()
     thread=connectionThread(conn,addr)
     thread.start()

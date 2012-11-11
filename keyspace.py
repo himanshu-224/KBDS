@@ -1,3 +1,4 @@
+import random
 from hashlib import sha1,md5
 
 NUM_PART = 256
@@ -14,17 +15,17 @@ def repartition(chunklist,numServer):
     MIN_PART = NUM_PART/numServer
     transferList = []
     dicLen = len(chunklist)
+    #print dicLen,MIN_PART
     diff = dicLen - MIN_PART
     if diff <=0 :
-        return tranferList
+        return transferList
     counter = 0
     x = dicLen/diff
-    for key in chunklist:
-        counter+=1
-        if(diff!=0):
-            if(counter%x == 0):
-                transferList.append(key)
-                diff-=1
+    while diff>0:
+        chunkId = random.randint(0,dicLen-1)
+        if chunklist[chunkId] not in transferList:
+            transferList.append(chunklist[chunkId])
+            diff-=1
     return transferList
 
 def getPartitionId(key):

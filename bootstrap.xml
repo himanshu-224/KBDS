@@ -3,12 +3,12 @@
         <node>
             <id>0</id>
             <ip>127.0.0.1</ip>
-            <port>8639</port>
+            <port>8652</port>
         </node>
         <node>
             <id>1</id>
             <ip>127.0.0.1</ip>
-            <port>8633</port>
+            <port>8673</port>
         </node>
     </nodeList>
 </bootstrap>

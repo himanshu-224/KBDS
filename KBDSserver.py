@@ -19,62 +19,62 @@ except:
 PORT=None
 for node in bsNodes:
     if int(node[0])==Id:
-	PORT=int(node[2])
-	HOST=node[1]
-	break
+        PORT=int(node[2])
+        HOST=node[1]
+        break
 		
 if PORT==None:
-	print 'Id does not exist at bootStrapList...Exiting'
-	sys.exit()
+    print 'Id does not exist at bootStrapList...Exiting'
+    sys.exit()
 
 def pingBootStrapNodes():
-	global bootStrapNodes
-	global activeNodes
-	tmpList=copyListofDict(bootStrapNodes)
-	for node in bsNodes:
-	    if int(node[0])!=Id:
-		t = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-		try:
-		    t.connect((node[1],node[2]))
-		    t.send('?type=bootstrap?request=bsinfo?ip='+HOST+'?port='+str(PORT)+'?numNodes='+str(len(activeNodes))+'?')
-		    data=t.recv(BUF_SIZE)
-		    tmpDict=handle_data(data)
-		    exists=False
-		    for node in tmpList:
-			if node['ip']==tmpDict['ip'] and node['port']==tmpDict['port']:
-			    node['numNodes']=tmpDict['numNodes']
-			    exists=True
-			    break
-		    if exists==False:
-		      tmpList.append(tmpDict)		    
-		      
-		    message=active_nodes_list_string(activeNodes)
-		    t.send(message)
-		    data=t.recv(BUF_SIZE)
-		    t.send('?request=endconnection?')
-		    t.close()
-		except socket.error:
-		    pass
-	    else:
-		exists=False
-		for node in tmpList:
-		    if node['ip']==HOST and node['port']==str(PORT):
-			node['numNodes']=str(len(activeNodes))
-			exists=True
-			break
-		if exists==False:
-		    tmpList.append({'ip':HOST, 'port':str(PORT), 'numNodes':str(len(activeNodes))})
-		    
-	    bootStrapNodes=tmpList
-	    #print tmpList
+    global bootStrapNodes
+    global activeNodes
+    tmpList=copyListofDict(bootStrapNodes)
+    for node in bsNodes:
+        if int(node[0])!=Id:
+            t = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            try:
+                t.connect((node[1],node[2]))
+                t.send('?type=bootstrap?request=bsinfo?ip='+HOST+'?port='+str(PORT)+'?numNodes='+str(len(activeNodes))+'?')
+                data=t.recv(BUF_SIZE)
+                tmpDict=handle_data(data)
+                exists=False
+                for node in tmpList:
+                    if node['ip']==tmpDict['ip'] and node['port']==tmpDict['port']:
+                        node['numNodes']=tmpDict['numNodes']
+                        exists=True
+                        break
+                if exists==False:
+                    tmpList.append(tmpDict)
+                    
+                message=active_nodes_list_string(activeNodes)
+                t.send(message)
+                data=t.recv(BUF_SIZE)
+                t.send('?request=endconnection?')
+                t.close()
+            except socket.error:
+                pass
+        else:
+            exists=False
+            for node in tmpList:
+                if node['ip']==HOST and node['port']==str(PORT):
+                    node['numNodes']=str(len(activeNodes))
+                    exists=True
+                    break
+            if exists==False:
+                tmpList.append({'ip':HOST, 'port':str(PORT), 'numNodes':str(len(activeNodes))})
+    
+        bootStrapNodes=tmpList
+        #print tmpList
                 
 HOST=get_ip()
 #PORT=5789
 BUF_SIZE=2048
 
 def bsinfo():
-	message='?ip='+str(HOST)+'?port='+str(PORT)+'?numNodes='+str(len(activeNodes))+'?'
-	return message
+    message='?ip='+str(HOST)+'?port='+str(PORT)+'?numNodes='+str(len(activeNodes))+'?'
+    return message
 
 class connectionThread(Thread):
     def __init__(self,conn,addr):
@@ -85,9 +85,9 @@ class connectionThread(Thread):
         
     def run(self):
         while 1:
-	    global bootStrapNodes
-	    global activeNodes
-	    global allActiveNodes
+            global bootStrapNodes
+            global activeNodes
+            global allActiveNodes
             data=self.conn.recv(self.BUF_SIZE)
             dataDict=handle_data(data)
             #print dataDict
@@ -96,47 +96,48 @@ class connectionThread(Thread):
                 message=nodes_list_string(allActiveNodes)
                 self.conn.send(message)
            
-	    elif 'type' in dataDict.keys() and 'request' in dataDict.keys() and 'length' in dataDict.keys() and 'addr' in dataDict.keys() and dataDict['type']=='bootstrap' and dataDict['request']=='getnodes':
-		addrList= dataDict['addr']
-		addrList=addrList.split('#')
-		tmpAllActiveNodes=copyListofDict(allActiveNodes)
-		for node in addrList:
-		    if node!='':
-			exists=False
-			tmpDict={'ip' : node.split(':')[0], 'port' : node.split(':')[1]}
-			if tmpDict not in tmpAllActiveNodes:
-			    tmpAllActiveNodes.append(tmpDict)
-		allActiveNodes =tmpAllActiveNodes
-		self.conn.send('?noted=yes?')      
+            elif 'type' in dataDict.keys() and 'request' in dataDict.keys() and 'length' in dataDict.keys() and 'addr' in dataDict.keys() and dataDict['type']=='bootstrap' and dataDict['request']=='getnodes':
+                addrList= dataDict['addr']
+                addrList=addrList.split('#')
+                tmpAllActiveNodes=copyListofDict(allActiveNodes)
+                for node in addrList:
+                    if node!='':
+                        exists=False
+                        tmpDict={'ip' : node.split(':')[0], 'port' : node.split(':')[1]}
+                        if tmpDict not in tmpAllActiveNodes:
+                            tmpAllActiveNodes.append(tmpDict)
+                allActiveNodes =tmpAllActiveNodes
+                self.conn.send('?noted=yes?')      
 		      
 		      
             elif 'type' in dataDict.keys() and 'request' in dataDict.keys() and dataDict['type']=='keyserver' and dataDict['request']=='allbsinfo':    
-		message=bsnodes_list_string(bootStrapNodes)
-		print bootStrapNodes
-		self.conn.send(message)
+                message=bsnodes_list_string(bootStrapNodes)
+                print bootStrapNodes
+                self.conn.send(message)
             elif 'type' in dataDict.keys() and 'request' in dataDict.keys() and 'ip' in dataDict.keys() and 'port' in dataDict.keys()  and dataDict['type']=='keyserver' and dataDict['request']=='register':
                     
-		tmpDict={'ip':dataDict['ip'], 'port':dataDict['port']}
-		if  tmpDict not in activeNodes:
-		    activeNodes.append(tmpDict)
-		if tmpDict not in allActiveNodes:
-		    allActiveNodes.append(tmpDict)
-		message=active_nodes_list_string(allActiveNodes)
-		self.conn.send('?reply=yes'+message)
-		pingBootStrapNodes()
+                tmpDict={'ip':dataDict['ip'], 'port':dataDict['port']}
+                if  tmpDict not in activeNodes:
+                    activeNodes.append(tmpDict)
+                if tmpDict not in allActiveNodes:
+                    allActiveNodes.append(tmpDict)
+                message=active_nodes_list_string(allActiveNodes)
+                self.conn.send('?reply=yes'+message)
+                pingBootStrapNodes()
             
             elif 'type' in dataDict.keys() and 'request' in dataDict.keys() and 'numNodes' in dataDict.keys() and 'ip' in dataDict.keys() and 'port' in dataDict.keys()  and dataDict['type']=='bootstrap' and dataDict['request']=='bsinfo':    
-		message=bsinfo()
-		tmpDict={'ip':dataDict['ip'], 'port':dataDict['port'] , 'numNodes' : dataDict['numNodes']}
-		exists=False
-		for node in bootStrapNodes:
-		  if node['ip']==tmpDict['ip'] and node['port']==tmpDict['port']:
-		    node['numNodes']=tmpDict['numNodes']
-		    exists=True
-		    break
-		if exists==False:
-		  bootStrapNodes.append(tmpDict)
-		self.conn.send(message)
+                message=bsinfo()
+                tmpDict={'ip':dataDict['ip'], 'port':dataDict['port'] , 'numNodes' : dataDict['numNodes']}
+                exists=False
+                for node in bootStrapNodes:
+                    if node['ip']==tmpDict['ip'] and node['port']==tmpDict['port']:
+                        node['numNodes']=tmpDict['numNodes']
+                        exists=True
+                        break
+                if exists==False:
+                    bootStrapNodes.append(tmpDict)
+                self.conn.send(message)
+                ### Add the functionality to receive the active Nodes List and process it
 				
             elif 'request' in dataDict.keys() and dataDict['request']=='endconnection':
                 self.conn.close()
