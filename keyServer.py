@@ -1,4 +1,5 @@
 import socket
+import time
 import random
 import operator
 from bootstraplist import BootStrapNodeList
@@ -11,7 +12,7 @@ NUM_PART = 256
 
 HOST=get_ip()
 PORT=random.randint(5000,65000)
-BUFSIZE=2048
+BUFF_SIZE=2048
 bsn = BootStrapNodeList()
 bsn.generateList('bootstrap.xml',False)
 bsNodes=bsn.returnList()
@@ -33,6 +34,7 @@ while(1):
 MAIN_CHUNK_LIST = []
 BACKUP_CHUNK_LIST = []
 DATA_STORE = {}
+UPDATE_INFO = {}
 
 ### Server global list
 allActiveNodes=[]
@@ -41,6 +43,7 @@ for i in xrange(256):
     CHUNK_NODE_MAP[i]=['','']
     
 #Select the Zone to connect to somehow
+myBSNode = ()
     
 class connectionThread(Thread):
     def __init__(self,conn,addr):
@@ -69,7 +72,18 @@ class connectionThread(Thread):
                     self.conn.close()
                     break
                     
-            if 'type' in dataDict.keys() and 'request' in dataDict.keys() and dataDict['type']=='client' and dataDict['request']=='keyspace':
+            elif dataDict.has_key('type') and dataDict['type'] == 'bootstrap':
+                if dataDict.has_key('request') and dataDict['request'] == 'update':
+                    updateChunk(dataDict['chunks'])
+                    Msg = '?type=keyserver?received=yes?'
+                    self.conn.send(Msg)
+                
+                elif dataDict.has_key('request') and dataDict['request'] == 'endconnection':
+                    print 'Ending connection with ',self.addr[0],':',self.addr[1]
+                    self.conn.close()
+                    break
+                    
+            elif 'type' in dataDict.keys() and 'request' in dataDict.keys() and dataDict['type']=='client' and dataDict['request']=='keyspace':
                 pass            
             elif 'request' in dataDict.keys() and dataDict['request']=='endconnection':
                 print 'Ending connection with ',self.addr[0],':',self.addr[1]
@@ -150,6 +164,7 @@ class chunkRequestThread(Thread):
         global CHUNK_NODE_MAP
         global DATA_STORE
         global allActiveNodes
+        global UPDATE_INFO
         
         numKeyServer = len(allActiveNodes)
         Msg = '?type=keyserver?request=keyspace?numNodes='+str(numKeyServer)+'?'
@@ -167,15 +182,31 @@ class chunkRequestThread(Thread):
                     chunklist = msg.split(':')
                     for chunks in chunklist :
                         if len(chunks)!=0:
-                            MAIN_CHUNK_LIST.append(int(chunks))
-                            CHUNK_NODE_MAP[int(chunks)][0] = currentServer
+                            chunks = int(chunks)
+                            MAIN_CHUNK_LIST.append(chunks)
+                            CHUNK_NODE_MAP[chunks][0] = currentServer
+                            if not UPDATE_INFO.has_key(chunks):
+                                UPDATE_INFO[chunks] = {}
+                            elif UPDATE_INFO[chunks]['type'] == 'backup':
+                                chunks += NUM_PART
+                            UPDATE_INFO[chunks]['type'] = 'main'
+                            UPDATE_INFO[chunks]['new'] = currentServer
+                            UPDATE_INFO[chunks]['old'] = requestServer
                 msg = dataDict['backup']
                 if msg.find(':')!=-1:
                     chunklist = msg.split(':')
                     for chunks in chunklist :
                         if len(chunks)!=0:
-                            BACKUP_CHUNK_LIST.append(int(chunks))
-                            CHUNK_NODE_MAP[int(chunks)][1] = currentServer
+                            chunks = int(chunks)
+                            BACKUP_CHUNK_LIST.append(chunks)
+                            CHUNK_NODE_MAP[chunks][1] = currentServer
+                            if not UPDATE_INFO.has_key(chunks):
+                                UPDATE_INFO[chunks] = {}
+                            elif UPDATE_INFO[chunks]['type'] == 'main':
+                                chunks +=NUM_PART
+                            UPDATE_INFO[chunks]['type'] = 'backup'
+                            UPDATE_INFO[chunks]['new'] = currentServer
+                            UPDATE_INFO[chunks]['old'] = requestServer
         Msg = '?type=keyserver?request=endconnection?'
         sock.send(Msg)
         #print MAIN_CHUNK_LIST
@@ -191,6 +222,32 @@ def handle_data(data):
     return dataDict
     
 bsNodesList=[]
+
+def updateChunk(chunkstr):
+    if chunkstr.find('#') == -1:
+        return
+    chunklist = chunkstr.split('#')
+    for chunk in chunklist:
+        if len(chunk)!= 0 and chunk.find('@')!= -1:
+            chunk2 = chunk.split('@')
+            if chunk2[1] == 'main':
+                if CHUNK_NODE_MAP[int(chunk2[0])][0] == chunk2[3]:
+                    CHUNK_NODE_MAP[int(chunk2[0])][0] = chunk2[2]
+            elif chunk2[1] == 'backup':
+                if CHUNK_NODE_MAP[int(chunk2[0])][1] == chunk2[3]:
+                    CHUNK_NODE_MAP[int(chunk2[0])][1] = chunk2[2]
+    return
+
+def initChunk(chunkstr):
+    if chunkstr.find('#') == -1:
+        return
+    chunklist = chunkstr.split('#')
+    for chunk in chunklist:
+        if len(chunk)!= 0 and chunk.find('@')!= -1:
+            chunk2 = chunk.split('@')
+            CHUNK_NODE_MAP[int(chunk2[0])][0] = chunk2[1]
+            CHUNK_NODE_MAP[int(chunk2[0])][1] = chunk2[2]
+    return
 
 def select_bsnode_sequentially(i):
     if len(bsNodes)>i:
@@ -210,6 +267,44 @@ def establish_keyspace(s):
     print 'Successfully Registered Keyspace'
     return True
 
+###Sends update information    
+def sendUpdateInfo():
+    global UPDATE_INFO
+    global myBSNode
+    global BUFF_SIZE
+
+    keys = UPDATE_INFO.keys()
+    initMsg='?type=keyserver?request=update?continue='
+    Msg = '?chunks='
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        sock.connect((myBSNode[1],int(myBSNode[2])))
+        print 'Update part : Connected with bootstrap node ',myBSNode[1],':',myBSNode[2]
+        count = 0
+        for key in keys:
+            if count == 60:
+                Msg = initMsg+'yes'+Msg+'?'
+                sock.send(Msg)
+                data = sock.recv(BUFF_SIZE)
+                Msg = '?chunks='
+                count = 0
+            if key >= NUM_PART:
+                key2 = key - NUM_PART
+            else:
+                key2 = key
+            Msg+=str(key2)+'@'+UPDATE_INFO[key]['type']+'@'+UPDATE_INFO[key]['new']+'@'+UPDATE_INFO[key]['old']+'#'
+            count+=1
+            del(UPDATE_INFO[key])
+        Msg = initMsg+'no'+Msg+'?'
+        sock.send(Msg)
+        data = sock.recv(BUFF_SIZE)
+        sock.close()
+        UPDATE_INFO={}
+    except socket.error, msg :
+        print 'Bind failed. Error Code : ' + str(msg[0]) + ' Message ' + msg[1]
+        
+    return
+        
     
 
 
@@ -241,7 +336,7 @@ while(1):
 	print 'Connected with BootStrapNode ',myBSNode[1],':',myBSNode[2]
 	initMsg='?type=keyserver?request=allbsinfo?'		
         s.send(initMsg)
-	data=s.recv(BUFSIZE)
+	data=s.recv(BUFF_SIZE)
         bsNodesList=handle_list_data(data)
 	print bsNodesList
         s.send('?request=endconnection?')
@@ -267,13 +362,11 @@ while(1):
         print 'Connected with BootStrapNode ',myBSNode[1],':',myBSNode[2]
         initMsg='?type=keyserver?request=register?ip='+HOST+'?port='+str(PORT)+'?'
         s.send(initMsg)
-        data=s.recv(BUFSIZE)
+        data=s.recv(BUFF_SIZE)
         dataDict=handle_data(data)
         print dataDict
         if 'reply' in dataDict.keys() and dataDict['reply']=='yes':
             print 'Initializing registeration process with ',myBSNode[1],':',myBSNode[2]
-            s.send('?request=endconnection?')
-            s.close()            
             success=establish_keyspace(s)
             addrList= dataDict['addr']
             addrList=addrList.split('#')
@@ -281,15 +374,26 @@ while(1):
                 if node!='':
                     tmpDict={'ip' : node.split(':')[0], 'port' : node.split(':')[1]}
                     allActiveNodes.append(tmpDict)
-                    
+            initMsg = '?type=keyserver?received=yes?'
+            s.send(initMsg)
+            while(1):
+                data = s.recv(BUFF_SIZE)
+                dataDict=handle_data(data)
+                s.send(initMsg)
+                if dataDict.has_key('chunks') :
+                    initChunk(dataDict['chunks'])
+                if dataDict.has_key('continue') and dataDict['continue']=='no':
+                    s.close()
+                    break
             if success==True:
                 break
     except socket.error, msg:
         print 'Bind failed. Error Code : ' + str(msg[0]) + ' Message ' + msg[1]
     attemptno+=1        
 
-print allActiveNodes    
-
+print allActiveNodes
+print CHUNK_NODE_MAP
+#print myBSNode
 ### Add functionality to get all the data and chunks
 if len(allActiveNodes) == 1:
     currentServer = HOST + ':' + str(PORT)
@@ -297,18 +401,31 @@ if len(allActiveNodes) == 1:
         MAIN_CHUNK_LIST.append(i)
         CHUNK_NODE_MAP[i][0] = currentServer
         CHUNK_NODE_MAP[i][1] = currentServer
+        UPDATE_INFO[i] = {}
+        UPDATE_INFO[i]['type']='main'
+        UPDATE_INFO[i]['new']=currentServer
+        UPDATE_INFO[i]['old']=''
+        UPDATE_INFO[i+NUM_PART]={}
+        UPDATE_INFO[i+NUM_PART]['type']='backup'
+        UPDATE_INFO[i+NUM_PART]['new']=currentServer
+        UPDATE_INFO[i+NUM_PART]['old']=''
 else :
-    print 'else'
+    #print 'else'
     currentServer = HOST + ':' + str(PORT)
+    threadlist=[]
     for keyNode in allActiveNodes:
         otherServer = keyNode['ip']+':'+keyNode['port']
-        print otherServer
+        #print otherServer
         if currentServer != otherServer:
-            print 'else2'
+            #print 'else2'
             thread = chunkRequestThread(keyNode)
+            threadlist.append(thread)
             thread.start()
-
+    for thread in threadlist:
+        while thread.is_alive():
+            time.sleep(0.5)
 #print MAIN_CHUNK_LIST
+sendUpdateInfo()
 
 serv.listen(10) 
 
