@@ -245,6 +245,7 @@ def initChunk(chunkstr):
     for chunk in chunklist:
         if len(chunk)!= 0 and chunk.find('@')!= -1:
             chunk2 = chunk.split('@')
+            print chunk2
             CHUNK_NODE_MAP[int(chunk2[0])][0] = chunk2[1]
             CHUNK_NODE_MAP[int(chunk2[0])][1] = chunk2[2]
     return
@@ -282,7 +283,7 @@ def sendUpdateInfo():
         print 'Update part : Connected with bootstrap node ',myBSNode[1],':',myBSNode[2]
         count = 0
         for key in keys:
-            if count == 60:
+            if count == 40:
                 Msg = initMsg+'yes'+Msg+'?'
                 sock.send(Msg)
                 data = sock.recv(BUFF_SIZE)

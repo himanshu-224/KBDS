@@ -182,7 +182,7 @@ class connectionThread(Thread):
         Msg = '?chunks='
         count = 0
         for key in CHUNK_NODE_MAP:
-            if count == 60 :
+            if count == 40 :
                 Msg = initMsg+'yes'+Msg+'?'
                 self.conn.send(Msg)
                 data = self.conn.recv(self.BUFF_SIZE)
@@ -209,21 +209,25 @@ class UpdateThread(Thread):
     def run(self):
         if len(self.UPDATE) == 0:
             return
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        try :
-            sock.connect((self.nodeIp,int(self.nodePort)))
-            initMsg = '?type=bootstrap?request=update?chunks='
-            Msg=''
-            for upstr in self.UPDATE:
-                Msg = initMsg+upstr+'?'
-                sock.send(Msg)
-                data = sock.recv(self.BUFF_SIZE)
-            initMsg = '?type=bootstrap?request=endconnection?'
-            sock.send(initMsg)
-            sock.close()
-            print 'UPDATE Msg sent to ' + self.nodeIp+':'+self.nodePort
-        except socket.error, msg :
-            print 'Bind failed. Error Code : ' + str(msg[0]) + ' Message ' + msg[1]
+        attempt = 0
+        while attempt<5:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            try :
+                sock.connect((self.nodeIp,int(self.nodePort)))
+                initMsg = '?type=bootstrap?request=update?chunks='
+                Msg=''
+                for upstr in self.UPDATE:
+                    Msg = initMsg+upstr+'?'
+                    sock.send(Msg)
+                    data = sock.recv(self.BUFF_SIZE)
+                initMsg = '?type=bootstrap?request=endconnection?'
+                sock.send(initMsg)
+                sock.close()
+                print 'UPDATE Msg sent to ' + self.nodeIp+':'+self.nodePort
+                break
+            except socket.error, msg :
+                print 'Bind failed. Error Code : ' + str(msg[0]) + ' Message ' + msg[1]
+            attempt+=1
 
 def updateChunk(chunkstr):
     if chunkstr.find('#') == -1:
